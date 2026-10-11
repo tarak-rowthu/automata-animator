@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Automaton, Transition } from '../../types/automaton';
+import { AcceptingStatePulse } from './AcceptingStatePulse';
 
 interface StatePosition {
   id: string;
@@ -7,15 +8,19 @@ interface StatePosition {
   y: number;
 }
 
-interface AutomatonCanvasProps {
+export interface AutomatonCanvasProps {
   automaton: Automaton;
   highlightedStates?: string[];
   highlightedTransitions?: Transition[];
   activeStates?: string[];
+  activeTransitions?: Transition[];
+  selectedState?: string | null;
   onStateClick?: (state: string) => void;
   height?: number;
   readOnly?: boolean;
   dfaSubsets?: Record<string, string[]>; // maps dfaState -> nfaStates
+  isPaused?: boolean;
+  isFinalCelebration?: boolean;
 }
 
 function layoutStates(states: string[], existingPositions?: StatePosition[]): StatePosition[] {
@@ -61,11 +66,16 @@ function selfLoopPath(cx: number, cy: number, r: number = 28): string {
 export const AutomatonCanvas: React.FC<AutomatonCanvasProps> = ({
   automaton,
   highlightedStates = [],
+  highlightedTransitions = [],
   activeStates = [],
+  activeTransitions = [],
+  selectedState = null,
   onStateClick,
   height = 360,
   readOnly = true,
   dfaSubsets,
+  isPaused = false,
+  isFinalCelebration = false,
 }) => {
   const [positions, setPositions] = useState<StatePosition[]>([]);
   const [dragging, setDragging] = useState<string | null>(null);
@@ -159,21 +169,17 @@ export const AutomatonCanvas: React.FC<AutomatonCanvasProps> = ({
     if (positions.length === 0) return;
     const xs = positions.map(p => p.x);
     const ys = positions.map(p => p.y);
-    const minX = Math.min(...xs) - 60;
-    const minY = Math.min(...ys) - 60;
-    const maxX = Math.max(...xs) + 60;
-    const maxY = Math.max(...ys) + 60;
+    const minX = Math.min(...xs) - 70;
+    const minY = Math.min(...ys) - 70;
+    const maxX = Math.max(...xs) + 70;
+    const maxY = Math.max(...ys) + 70;
     setViewBox({ x: minX, y: minY, w: maxX - minX, h: maxY - minY });
   }
 
-  const EPSILON_SYM = 'ε';
-
-  function renderArrowhead(color: string) {
-    return color;
-  }
-
   const getStateColor = (state: string) => {
-    if (activeStates.includes(state)) return '#22d3ee';
+    if (activeStates.includes(state)) {
+      return automaton.acceptingStates.includes(state) ? '#10b981' : '#22d3ee';
+    }
     if (highlightedStates.includes(state)) return '#fbbf24';
     if (automaton.acceptingStates.includes(state)) return '#10b981';
     if (automaton.initialState === state) return '#8b5cf6';
@@ -219,8 +225,12 @@ export const AutomatonCanvas: React.FC<AutomatonCanvasProps> = ({
               </marker>
             );
           })}
-          <filter id="glow">
-            <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+          <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+            <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <filter id="accept-glow" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
             <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
           </filter>
         </defs>
@@ -233,13 +243,13 @@ export const AutomatonCanvas: React.FC<AutomatonCanvasProps> = ({
               <line
                 x1={pos.x - 60}
                 y1={pos.y}
-                x2={pos.x - NODE_R - 2}
+                x2={pos.x - NODE_R - 3}
                 y2={pos.y}
                 stroke="#8b5cf6"
-                strokeWidth="2"
+                strokeWidth="2.2"
                 markerEnd="url(#arrow-violet)"
               />
-              <text x={pos.x - 65} y={pos.y - 6} fill="#a78bfa" fontSize="10" textAnchor="middle">start</text>
+              <text x={pos.x - 65} y={pos.y - 7} fill="#a78bfa" fontSize="10.5" fontWeight="600" textAnchor="middle">start</text>
             </g>
           );
         })()}
@@ -250,12 +260,24 @@ export const AutomatonCanvas: React.FC<AutomatonCanvasProps> = ({
           const from = getPos(fromId);
           const to = getPos(toId);
           const label = transitions.map(t => t.symbol === 'ε' ? 'ε' : t.symbol).join(', ');
-          const isHighlighted = transitions.some(t =>
-            activeStates.includes(t.from) || highlightedStates.includes(t.from)
-          );
-          const color = isHighlighted ? '#22d3ee' : 'rgba(148, 163, 184, 0.6)';
-          const arrowColor = isHighlighted ? 'cyan' : 'blue';
+
+          // Check if this transition edge is actively traversed
+          const isTraversed =
+            activeTransitions.some(t => t.from === fromId && t.to === toId) ||
+            highlightedTransitions.some(t => t.from === fromId && t.to === toId);
+
+          const isHighlighted =
+            isTraversed ||
+            transitions.some(t => activeStates.includes(t.from) || highlightedStates.includes(t.from));
+
           const hasEpsilon = transitions.some(t => t.symbol === 'ε');
+          const color = isTraversed
+            ? (hasEpsilon ? '#c084fc' : '#22d3ee')
+            : isHighlighted
+            ? (hasEpsilon ? '#a78bfa' : '#38bdf8')
+            : 'rgba(148, 163, 184, 0.45)';
+
+          const arrowColor = hasEpsilon ? 'violet' : isTraversed ? 'cyan' : isHighlighted ? 'cyan' : 'blue';
 
           if (fromId === toId) {
             // Self-loop
@@ -265,19 +287,30 @@ export const AutomatonCanvas: React.FC<AutomatonCanvasProps> = ({
                 <path
                   d={path}
                   fill="none"
-                  stroke={hasEpsilon ? '#8b5cf6' : color}
-                  strokeWidth={isHighlighted ? 2 : 1.5}
-                  markerEnd={`url(#arrow-${hasEpsilon ? 'violet' : arrowColor})`}
-                  strokeDasharray={hasEpsilon ? '4 2' : undefined}
+                  stroke={color}
+                  strokeWidth={isTraversed ? 2.8 : isHighlighted ? 2.2 : 1.5}
+                  markerEnd={`url(#arrow-${arrowColor})`}
+                  strokeDasharray={hasEpsilon ? '4 2' : isTraversed ? '6 3' : undefined}
+                  filter={isTraversed ? 'url(#glow)' : undefined}
                 />
+                {/* Moving indicator along edge */}
+                {isTraversed && !isPaused && (
+                  <circle r="4" fill={hasEpsilon ? '#c084fc' : '#22d3ee'} filter="url(#glow)">
+                    <animateMotion
+                      path={path}
+                      dur="1.2s"
+                      repeatCount="indefinite"
+                    />
+                  </circle>
+                )}
                 <text
                   x={from.x}
                   y={from.y - NODE_R - 40}
                   textAnchor="middle"
-                  fill={hasEpsilon ? '#a78bfa' : '#94a3b8'}
+                  fill={isTraversed ? '#22d3ee' : hasEpsilon ? '#c084fc' : '#94a3b8'}
                   fontSize="11"
                   fontFamily="JetBrains Mono, monospace"
-                  fontWeight={isHighlighted ? '700' : '400'}
+                  fontWeight={isTraversed ? '800' : isHighlighted ? '700' : '500'}
                 >{label}</text>
               </g>
             );
@@ -291,11 +324,11 @@ export const AutomatonCanvas: React.FC<AutomatonCanvasProps> = ({
           const uy = dy / len;
           const x1 = from.x + ux * NODE_R;
           const y1 = from.y + uy * NODE_R;
-          const x2 = to.x - ux * (NODE_R + 4);
-          const y2 = to.y - uy * (NODE_R + 4);
+          const x2 = to.x - ux * (NODE_R + 5);
+          const y2 = to.y - uy * (NODE_R + 5);
           const path = curvePath(x1, y1, x2, y2, offset);
 
-          // Label midpoint (offset for curve)
+          // Label midpoint
           const mx = (x1 + x2) / 2;
           const my = (y1 + y2) / 2;
           const nx2 = -dy / len;
@@ -309,20 +342,30 @@ export const AutomatonCanvas: React.FC<AutomatonCanvasProps> = ({
               <path
                 d={path}
                 fill="none"
-                stroke={hasEpsilon ? '#8b5cf6' : color}
-                strokeWidth={isHighlighted ? 2 : 1.5}
-                markerEnd={`url(#arrow-${hasEpsilon ? 'violet' : arrowColor})`}
-                strokeDasharray={hasEpsilon ? '4 2' : undefined}
-                filter={isHighlighted ? 'url(#glow)' : undefined}
+                stroke={color}
+                strokeWidth={isTraversed ? 2.8 : isHighlighted ? 2.2 : 1.5}
+                markerEnd={`url(#arrow-${arrowColor})`}
+                strokeDasharray={hasEpsilon ? '4 2' : isTraversed ? '6 3' : undefined}
+                filter={isTraversed ? 'url(#glow)' : undefined}
               />
+              {/* Traveling visual indicator dot */}
+              {isTraversed && !isPaused && (
+                <circle r="4.2" fill={hasEpsilon ? '#c084fc' : '#22d3ee'} filter="url(#glow)">
+                  <animateMotion
+                    path={path}
+                    dur="1.2s"
+                    repeatCount="indefinite"
+                  />
+                </circle>
+              )}
               <text
                 x={lx}
                 y={ly}
                 textAnchor="middle"
-                fill={hasEpsilon ? '#a78bfa' : '#94a3b8'}
+                fill={isTraversed ? '#22d3ee' : hasEpsilon ? '#c084fc' : '#94a3b8'}
                 fontSize="11"
                 fontFamily="JetBrains Mono, monospace"
-                fontWeight={isHighlighted ? '700' : '400'}
+                fontWeight={isTraversed ? '800' : isHighlighted ? '700' : '500'}
               >{label}</text>
             </g>
           );
@@ -334,8 +377,9 @@ export const AutomatonCanvas: React.FC<AutomatonCanvasProps> = ({
           const isInitial = automaton.initialState === id;
           const isActive = activeStates.includes(id);
           const isHighlighted = highlightedStates.includes(id);
+          const isSelected = selectedState === id;
           const color = getStateColor(id);
-          const strokeWidth = isActive || isHighlighted ? 2.5 : 2;
+          const strokeWidth = isSelected ? 3 : isActive || isHighlighted ? 2.6 : 2;
 
           return (
             <g
@@ -343,37 +387,66 @@ export const AutomatonCanvas: React.FC<AutomatonCanvasProps> = ({
               transform={`translate(${x},${y})`}
               onMouseDown={(e) => handleMouseDown(e, id)}
               onClick={() => onStateClick?.(id)}
-              style={{ cursor: readOnly ? 'default' : 'grab' }}
+              style={{ cursor: onStateClick ? 'pointer' : readOnly ? 'default' : 'grab' }}
             >
-              {/* Double circle for accepting */}
-              {isAccepting && (
-                <circle r={NODE_R + 5} fill="none" stroke={color} strokeWidth={1.5} opacity={0.6} />
+              {/* Selected highlight ring */}
+              {isSelected && (
+                <circle
+                  r={NODE_R + (isAccepting ? 12 : 7)}
+                  fill="none"
+                  stroke="#38bdf8"
+                  strokeWidth="2"
+                  strokeDasharray="4 2"
+                  filter="url(#glow)"
+                />
               )}
+
+              {/* Accepting state animations: pulse, ripple, sparkles, badge */}
+              {isAccepting && (
+                <AcceptingStatePulse
+                  cx={0}
+                  cy={0}
+                  nodeRadius={NODE_R}
+                  isActive={isActive || (isFinalCelebration && isActive)}
+                  isFinalCelebration={isFinalCelebration && isActive}
+                  showBadge={isActive}
+                  badgeLabel={dfaSubsets?.[id] ? 'ACCEPTING DFA' : 'ACCEPTING'}
+                />
+              )}
+
+              {/* Base State Node Circle */}
               <circle
                 r={NODE_R}
-                fill={`rgba(${color === '#10b981' ? '16,185,129' : color === '#8b5cf6' ? '139,92,246' : color === '#22d3ee' ? '34,211,238' : color === '#fbbf24' ? '251,191,36' : '59,130,246'},0.15)`}
+                fill={
+                  isActive
+                    ? (isAccepting ? 'rgba(16, 185, 129, 0.25)' : 'rgba(34, 211, 238, 0.22)')
+                    : `rgba(${color === '#10b981' ? '16,185,129' : color === '#8b5cf6' ? '139,92,246' : color === '#22d3ee' ? '34,211,238' : color === '#fbbf24' ? '251,191,36' : '59,130,246'},0.12)`
+                }
                 stroke={color}
                 strokeWidth={strokeWidth}
-                filter={isActive || isHighlighted ? 'url(#glow)' : undefined}
+                filter={isActive || isHighlighted ? (isAccepting ? 'url(#accept-glow)' : 'url(#glow)') : undefined}
               />
+
+              {/* State Name */}
               <text
                 textAnchor="middle"
                 dominantBaseline="middle"
                 fill={color}
-                fontSize="11"
+                fontSize="11.5"
                 fontFamily="JetBrains Mono, monospace"
                 fontWeight="700"
               >{id}</text>
-              {/* DFA subset label */}
+
+              {/* DFA subset label if available */}
               {dfaSubsets?.[id] && (
                 <text
                   y={NODE_R + 14}
                   textAnchor="middle"
-                  fill="#64748b"
+                  fill="#94a3b8"
                   fontSize="9"
                   fontFamily="JetBrains Mono, monospace"
                 >
-                  {dfaSubsets[id].join(',')}
+                  &#123;{dfaSubsets[id].join(',')}&#125;
                 </text>
               )}
             </g>

@@ -6,6 +6,8 @@ import { AutomatonCanvas } from '../components/automaton/AutomatonCanvas';
 import { validateAutomaton } from '../algorithms/automatonValidation';
 import { EXAMPLE_AUTOMATON } from '../data/exampleAutomaton';
 
+import { FinalStateInspector } from '../components/automaton/FinalStateInspector';
+
 interface BuilderPageProps {
   automaton: Automaton;
   onChange: (a: Automaton) => void;
@@ -21,6 +23,7 @@ export const BuilderPage: React.FC<BuilderPageProps> = ({ automaton, onChange })
   const [jsonMode, setJsonMode] = useState(false);
   const [jsonError, setJsonError] = useState('');
   const [activeTab, setActiveTab] = useState<'visual' | 'json'>('visual');
+  const [selectedState, setSelectedState] = useState<string | null>(null);
 
   const validation = validateAutomaton(automaton);
 
@@ -178,7 +181,26 @@ export const BuilderPage: React.FC<BuilderPageProps> = ({ automaton, onChange })
         )}
 
         {/* Automaton canvas */}
-        <AutomatonCanvas automaton={automaton} height={360} readOnly={false} />
+        <AutomatonCanvas
+          automaton={automaton}
+          height={360}
+          readOnly={false}
+          selectedState={selectedState}
+          onStateClick={setSelectedState}
+        />
+
+        {/* Selected State Inspector */}
+        {selectedState && (
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <FinalStateInspector
+              stateId={selectedState}
+              automaton={automaton}
+              automatonType="epsilon-nfa"
+              originalAcceptingStates={automaton.acceptingStates}
+              onClose={() => setSelectedState(null)}
+            />
+          </div>
+        )}
 
         {/* Transition table */}
         {automaton.transitions.length > 0 && (

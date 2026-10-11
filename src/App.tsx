@@ -101,6 +101,7 @@ function App() {
                   setNfa(convertedNfa);
                   setEpsilonClosures(closures);
                 }}
+                onNavigate={setPage}
               />
             )}
             {page === 'nfa-to-dfa' && (
@@ -110,6 +111,7 @@ function App() {
                   setDfa(convertedDfa);
                   setDfaMapping(mapping);
                 }}
+                onNavigate={setPage}
               />
             )}
             {page === 'simulator' && (
